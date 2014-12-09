@@ -19,7 +19,7 @@ A simple console rogue-like game.
 # boss mobs
 # store
 # read in MP3, FFT to get beats, then use
-#   that as input for the input
+#   that as beat for the input
 
 
 import os
@@ -155,15 +155,6 @@ class Zombie(Monster):
             return self.pos + self.move_dir
 
 
-class MonsterList(object):
-    def __init__(self, mobs):
-        self._mobs = mobs
-
-    @property
-    def pos(self):
-        return [m.pos for m in self._mobs]
-
-
 ################################################################################
 #                                 Game Board
 ################################################################################
@@ -236,6 +227,11 @@ class WaterTile(Tile):
     is_swimmable = True
 
 
+class LavaTile(Tile):
+    name = '~'
+    face = Style.DIM + Fore.RED + name + Fore.RESET + Style.RESET_ALL
+
+
 _concrete_tiles = [DirtTile,
                    StoneWallTile,
                    WaterTile,
@@ -283,7 +279,7 @@ class Game(object):
         if move_commands.has_key(self.kp):
             new_pos = self.pl.pos + move_commands[self.kp]
             valid_move = self.board.is_valid_move(new_pos)
-            if new_pos in [mm.pos for mm in mobs]:
+            if new_pos in [mm.pos for mm in self.mobs]:
                 mob = [mm for mm in self.mobs if mm.pos == new_pos][0]
                 self.pl.attack(mob)
                 if mob.hp <= 0:
