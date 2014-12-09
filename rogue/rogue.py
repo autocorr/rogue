@@ -22,8 +22,10 @@ A simple console rogue-like game.
 #   that as input for the input
 
 
+import os
 import random
 from copy import deepcopy
+from colorama import (Fore, Back, Style)
 
 
 class GameOver(Exception):
@@ -42,18 +44,24 @@ class Position(object):
     def __add__(self, pos):
         return Position(self.x + pos.x, self.y + pos.y)
 
+    def __sub__(self, pos):
+        return Position(self.x - pos.x, self.y - pos.y)
+
     def __eq__(self, pos):
         return (self.x == pos.x) & (self.y == pos.y)
 
     def __repr__(self):
         return 'Position({x:4n},{y:4n})'.format(x=self.x, y=self.y)
 
+    def copy(self):
+        return deepcopy(self)
+
 
 cardinals = [
     Position(-1,  0),  # up
     Position( 1,  0),  # down
     Position( 0, -1),  # left
-    Position( 0,  1),   # right
+    Position( 0,  1),  # right
     ]
 
 
@@ -62,13 +70,13 @@ cardinals = [
 ################################################################################
 
 class Player(object):
-    face = '@'
-    color = None
+    name = '@'
+    face = Style.BRIGHT + Fore.YELLOW + name + Fore.RESET + Style.RESET_ALL
     hp = 10
     coins = 0
     score = 0
     base_hit = 1
-    
+
     def __init__(self, pos):
         self.pos = pos
 
@@ -91,11 +99,10 @@ class Player(object):
 
 class Monster(object):
     face = None
-    color = None
     hp = None
     score = None
     base_hit = None
-    
+
     def __init__(self, pos):
         self.pos = pos
 
@@ -108,32 +115,44 @@ class Monster(object):
     def attack(self, pl):
         pl.hp -= self.base_hit
 
+    def rand_card(self):
+        return random.choice(cardinals)
+
+    def rand_step(self):
+        return self.pos + self.rand_card()
+
 
 class Bat(Monster):
-    face = 'b'
+    name = 'b'
+    face = Fore.BLUE + name + Fore.RESET
     hp = 1
     score = 1
     base_hit = 1
+
     def get_move(self):
-        return self.pos + random.choice(cardinals)
+        return self.rand_step()
 
 
 class Zombie(Monster):
-    face = 'z'
+    name = 'z'
+    face = Fore.GREEN + name + Fore.RESET
     hp = 1
     score = 1
     base_hit = 1
 
     def __init__(self, pos):
         super(Zombie, self).__init__(pos)
-        self.move_dir = random.choice(cardinals)
+        self.move_dir = self.rand_card()
         self.old_pos = pos
 
     def get_move(self):
-        if self.old_pos != self.pos:
+        if self.old_pos == self.pos:
+            self.move_dir = self.rand_card()
+            self.old_pos = self.pos.copy()
             return self.pos + self.move_dir
         else:
-            return self.pos + random.choice(cardinals)
+            self.old_pos = self.pos.copy()
+            return self.pos + self.move_dir
 
 
 ################################################################################
@@ -149,7 +168,7 @@ class Board(object):
 
     def __str__(self):
         return '\n'.join([''.join([ti.face for ti in row])
-                          for row in self._b]) 
+                          for row in self._b])
 
     def __repr__(self):
         return 'Board(\n' + self.__str__() + '\n)'
@@ -175,7 +194,6 @@ def read_board(fname):
 
 class Tile(object):
     face = None
-    color = None
     is_passable = False
     is_breakable = False
     is_swimmable = False
@@ -188,20 +206,24 @@ class Tile(object):
 
 
 class BlankSpaceTile(Tile):
-    face = ' '
+    name = ' '
+    face = name
 
 
 class DirtTile(Tile):
-    face = '.'
+    name = '.'
+    face = Style.DIM + name + Style.RESET_ALL
     is_passable = True
-     
+
 
 class StoneWallTile(Tile):
-    face = '#'
+    name = '#'
+    face = Style.DIM + name + Style.RESET_ALL
 
 
 class WaterTile(Tile):
-    face = '~'
+    name = '~'
+    face = Style.DIM + Fore.BLUE + name + Fore.RESET + Style.RESET_ALL
     is_swimmable = True
 
 
@@ -211,14 +233,14 @@ _concrete_tiles = [DirtTile,
                    BlankSpaceTile,
                   ]
 
-_tiles = {ti.face: ti for ti in _concrete_tiles}
+_tiles = {ti.name : ti for ti in _concrete_tiles}
 
 
 ################################################################################
 #                               Event Loop
 ################################################################################
 
-valid_keys = list('qwasd')
+valid_keys = list('qwasd+')
 move_commands = {
     'w': Position(-1,  0),  # up
     's': Position( 1,  0),  # down
@@ -243,6 +265,9 @@ class Game(object):
                 break
         if kp == 'q':
             raise GameOver()
+        if kp == '+':
+            import ipdb
+            ipdb.set_trace()
         self.kp = kp
 
     def player_turn(self):
@@ -284,6 +309,7 @@ class Game(object):
         for mob in self.mobs:
             board[mob.pos] = mob
         print board
+        os.system('clear')
 
 
 if __name__ == '__main__':
