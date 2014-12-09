@@ -155,6 +155,15 @@ class Zombie(Monster):
             return self.pos + self.move_dir
 
 
+class MonsterList(object):
+    def __init__(self, mobs):
+        self._mobs = mobs
+
+    @property
+    def pos(self):
+        return [m.pos for m in self._mobs]
+
+
 ################################################################################
 #                                 Game Board
 ################################################################################
@@ -300,6 +309,7 @@ class Game(object):
             raise GameOver()
 
     def draw(self):
+        os.system('clear')
         board = deepcopy(self.board)
         print '---------------'
         print 'Score  : {0:7n}'.format(self.pl.score)
@@ -309,7 +319,6 @@ class Game(object):
         for mob in self.mobs:
             board[mob.pos] = mob
         print board
-        os.system('clear')
 
 
 if __name__ == '__main__':
