@@ -22,10 +22,12 @@ A simple console rogue-like game.
 #   that as beat for the input
 
 
-import os
 import random
 from copy import deepcopy
-from colorama import (Fore, Back, Style)
+from collections import deque
+import numpy as np
+from blessings import Terminal
+term = Terminal()
 
 
 class GameOver(Exception):
@@ -71,7 +73,7 @@ cardinals = [
 
 class Player(object):
     name = '@'
-    face = Style.BRIGHT + Fore.YELLOW + name + Fore.RESET + Style.RESET_ALL
+    face = '{t.bold}{t.yellow}{name}{t.normal}'.format(t=term, name=name)
     hp = 10
     coins = 0
     score = 0
@@ -124,18 +126,27 @@ class Monster(object):
 
 class Bat(Monster):
     name = 'b'
-    face = Fore.BLUE + name + Fore.RESET
+    face = '{t.blue}{name}{t.normal}'.format(t=term, name=name)
     hp = 1
     score = 1
     base_hit = 1
 
+    def __init__(self, pos):
+        super(Bat, self).__init__(pos)
+        self.move_until = 1
+
     def get_move(self):
-        return self.rand_step()
+        if self.move_until == 0:
+            self.move_until = 1
+            return self.rand_step()
+        else:
+            self.move_until -= 1
+            return self.pos
 
 
 class Zombie(Monster):
     name = 'z'
-    face = Fore.GREEN + name + Fore.RESET
+    face = '{t.green}{name}{t.normal}'.format(t=term, name=name)
     hp = 1
     score = 1
     base_hit = 1
@@ -143,16 +154,46 @@ class Zombie(Monster):
     def __init__(self, pos):
         super(Zombie, self).__init__(pos)
         self.move_dir = self.rand_card()
-        self.old_pos = pos
+        self.last_pos = pos
 
     def get_move(self):
-        if self.old_pos == self.pos:
+        if self.last_pos == self.pos:
             self.move_dir = self.rand_card()
-            self.old_pos = self.pos.copy()
+            self.last_pos = self.pos.copy()
             return self.pos + self.move_dir
         else:
-            self.old_pos = self.pos.copy()
+            self.last_pos = self.pos.copy()
             return self.pos + self.move_dir
+
+
+class GreenSlime(Monster):
+    name = 's'
+    face = '{t.green}{name}{t.normal}'.format(t=term, name=name)
+    hp = 1
+    score = 1
+    base_hit = 1
+
+    def get_move(self):
+        return self.pos
+
+
+class BlueSlime(Monster):
+    name = 's'
+    face = '{t.blue}{name}{t.normal}'.format(t=term, name=name)
+    hp = 1
+    score = 1
+    base_hit = 1
+
+    def __init__(self, pos):
+        super(BlueSlime, self).__init__(pos)
+        self.moves = deque([Position( 1, 0),
+                            Position( 0, 0),
+                            Position(-1, 0),
+                            Position( 0, 0)])
+
+    def get_move(self):
+        self.moves.rotate()
+        return self.pos + self.moves[0]
 
 
 ################################################################################
@@ -162,6 +203,10 @@ class Zombie(Monster):
 class Board(object):
     def __init__(self, lboard):
         self._b = lboard
+        # create array
+        xmax = max([ii.pos.x for ii in sum(lboard, []) if ii.is_clear_view])
+        ymax = max([ii.pos.y for ii in sum(lboard, []) if ii.is_clear_view])
+        self._v = np.zeros((xmax, ymax))
 
     def __getitem__(self, pos):
         return self._b[pos.x][pos.y]
@@ -176,8 +221,14 @@ class Board(object):
     def __setitem__(self, pos, tile):
         self._b[pos.x][pos.y] = tile
 
+    def flatten(self):
+        return sum(self._b, [])
+
     def is_valid_move(self, pos):
         return self[pos].is_passable
+
+    def copy(self):
+        return deepcopy(self)
 
 
 def read_board(fname):
@@ -197,6 +248,7 @@ class Tile(object):
     is_passable = False
     is_breakable = False
     is_swimmable = False
+    is_clear_view = False
 
     def __init__(self, pos):
         self.pos = pos
@@ -212,24 +264,27 @@ class BlankSpaceTile(Tile):
 
 class DirtTile(Tile):
     name = '.'
-    face = Style.DIM + name + Style.RESET_ALL
+    face = '{t.dim}{t.gray}{name}{t.normal}'.format(t=term, name=name)
     is_passable = True
+    is_clear_view = True
 
 
 class StoneWallTile(Tile):
     name = '#'
-    face = Style.DIM + name + Style.RESET_ALL
+    face = '{t.dim}{t.gray}{name}{t.normal}'.format(t=term, name=name)
 
 
 class WaterTile(Tile):
     name = '~'
-    face = Style.DIM + Fore.BLUE + name + Fore.RESET + Style.RESET_ALL
+    face = '{t.blue}{name}{t.normal}'.format(t=term, name=name)
     is_swimmable = True
+    is_clear_view = True
 
 
 class LavaTile(Tile):
     name = '~'
-    face = Style.DIM + Fore.RED + name + Fore.RESET + Style.RESET_ALL
+    face = '{t.red}{name}{t.normal}'.format(t=term, name=name)
+    is_clear_view = True
 
 
 _concrete_tiles = [DirtTile,
@@ -254,23 +309,68 @@ move_commands = {
     }
 
 
+class Screen(object):
+    stats_str = \
+"""----------------
+Score  : {pl.score:7n}
+Health : {pl.hp:2n} / 10
+Coins  : {pl.coins:7n}
+----------------"""
+    stats_pos = Position(0, 1)
+    map_pos = Position(6, 2)
+
+    def draw_stats(self, pl):
+        with term.location():
+            pos = self.stats_pos
+            for ii, line in enumerate(self.stats_str.split('\n')):
+                print term.move(pos.x + ii, pos.y) + line.format(pl=pl)
+
+    def draw_board(self, board):
+        with term.location():
+            for tile in board.flatten():
+                pos = self.map_pos + tile.pos
+                print term.move(pos.x, pos.y) + tile.face
+
+    def draw_player(self, pl):
+        with term.location():
+            pos = self.map_pos + pl.pos
+            print term.move(pos.x, pos.y) + pl.face
+
+    def draw_mobs(self, mobs):
+        with term.location():
+            for mob in mobs:
+                pos = self.map_pos + mob.pos
+                print term.move(pos.x, pos.y) + mob.face
+
+    def get_keypress(self):
+        while True:
+            kp = raw_input(term.move(term.height - 2, 1) +
+                           term.clear_eol + term.clear_bol + '> ')
+            if kp in valid_keys:
+                return kp
+
+
 class Game(object):
     kp = None
 
-    def __init__(self, board, pl, mobs):
+    def __init__(self, board, pl, mobs, screen):
         self.board = board
         self.pl = pl
         self.mobs = mobs
+        self.screen = screen
+
+    def draw(self):
+        print term.clear()
+        self.screen.draw_stats(self.pl)
+        self.screen.draw_board(self.board)
+        self.screen.draw_mobs(self.mobs)
+        self.screen.draw_player(self.pl)
 
     def handle_keypress(self):
-        kp = None
-        while True:
-            kp = raw_input('> ')
-            if kp in valid_keys:
-                break
+        kp = self.screen.get_keypress()
         if kp == 'q':
             raise GameOver()
-        if kp == '+':
+        elif kp == '+':
             import ipdb
             ipdb.set_trace()
         self.kp = kp
@@ -304,24 +404,15 @@ class Game(object):
         if self.pl.hp <= 0:
             raise GameOver()
 
-    def draw(self):
-        os.system('clear')
-        board = deepcopy(self.board)
-        print '---------------'
-        print 'Score  : {0:7n}'.format(self.pl.score)
-        print 'Health : {0:2n} / 10'.format(self.pl.hp)
-        print 'Coins  : {0:7n}'.format(self.pl.coins)
-        board[self.pl.pos] = self.pl
-        for mob in self.mobs:
-            board[mob.pos] = mob
-        print board
-
 
 if __name__ == '__main__':
+    screen = Screen()
     board = read_board('test_map.txt')
     pl = Player(Position(2, 5))
-    mobs = [Bat(Position(1, 3)), Zombie(Position(3, 7))]
-    game = Game(board, pl, mobs)
+    mobs = [Bat(Position(1, 3)),
+            Zombie(Position(3, 7)),
+            BlueSlime(Position(4, 16))]
+    game = Game(board, pl, mobs, screen)
     while True:
         try:
             game.draw()
