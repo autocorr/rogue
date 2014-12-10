@@ -8,7 +8,6 @@ A simple console rogue-like game.
 """
 # TODO
 # Generate maps
-# color
 # synchronous rhythmic input and indicator, generate a bass-line or drum
 #   beat using a given tempo
 # more mobs
@@ -23,12 +22,18 @@ A simple console rogue-like game.
 
 
 import random
+import numpy as np
 from copy import deepcopy
 from collections import deque
-import numpy as np
 from blessings import Terminal
+
+
 term = Terminal()
 
+
+################################################################################
+#                                 Exceptions
+################################################################################
 
 class GameOver(Exception):
     pass
@@ -180,7 +185,7 @@ class GreenSlime(Monster):
 class BlueSlime(Monster):
     name = 's'
     face = '{t.blue}{name}{t.normal}'.format(t=term, name=name)
-    hp = 1
+    hp = 2
     score = 1
     base_hit = 1
 
@@ -411,6 +416,7 @@ if __name__ == '__main__':
     pl = Player(Position(2, 5))
     mobs = [Bat(Position(1, 3)),
             Zombie(Position(3, 7)),
+            GreenSlime(Position(1, 7)),
             BlueSlime(Position(4, 16))]
     game = Game(board, pl, mobs, screen)
     while True:
