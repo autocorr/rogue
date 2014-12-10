@@ -5,23 +5,25 @@ Rogue
 =====
 
 A simple console rogue-like game.
+
 """
 # TODO
-# Generate maps
+# doors
+# generate maps
+# vision
+# unit pathing
+# lighting
+# loot and items
 # synchronous rhythmic input and indicator, generate a bass-line or drum
 #   beat using a given tempo
-# more mobs
-# doors
-# vision and lighting
-# loot and items
 # vertical levels, stairs
 # boss mobs
-# store
+# shopkeeper & store
 # read in MP3, FFT to get beats, then use
 #   that as beat for the input
 
-
 import random
+import subprocess
 import numpy as np
 from copy import deepcopy
 from collections import deque
@@ -208,13 +210,22 @@ class BlueSlime(Monster):
 class Board(object):
     def __init__(self, lboard):
         self._b = lboard
-        # create array
-        xmax = max([ii.pos.x for ii in sum(lboard, []) if ii.is_clear_view])
-        ymax = max([ii.pos.y for ii in sum(lboard, []) if ii.is_clear_view])
+        # Set vision arrays
+        xmax = max([ii.pos.x for ii in lboard]) + 1
+        ymax = max([ii.pos.y for ii in lboard]) + 1
         self._v = np.zeros((xmax, ymax))
+        self._m = np.zeros((xmax, ymax))
+        for tile in lboard:
+            if tile.is_clear_view:
+                self._v[tile.pos.x, tile.pos.y] = 1
+            if tile.is_passable:
+                self._m[tile.pos.x, tile.pos.y] = 1
+        # Set stairs
+        self.upstairs = [tt for tt in lboard if tt.name == '<'][0]
+        self.downstairs = [tt for tt in lboard if tt.name == '>'][0]
 
     def __getitem__(self, pos):
-        return self._b[pos.x][pos.y]
+        return self._b[pos.y + 50 * pos.x]
 
     def __str__(self):
         return '\n'.join([''.join([ti.face for ti in row])
@@ -224,16 +235,27 @@ class Board(object):
         return 'Board(\n' + self.__str__() + '\n)'
 
     def __setitem__(self, pos, tile):
-        self._b[pos.x][pos.y] = tile
+        self._b[pos.y + 50 * pos.x] = tile
 
-    def flatten(self):
-        return sum(self._b, [])
-
-    def is_valid_move(self, pos):
-        return self[pos].is_passable
+    def tiles(self):
+        return self._b
 
     def copy(self):
         return deepcopy(self)
+
+
+def get_floor():
+    floor = subprocess.Popen(['./map_generator'],
+                             stdout=subprocess.PIPE).communicate()[0]
+    floor = floor.replace('X', ' ')
+    floor = [floor[ii:ii+50] for ii in range(0, 15 * 50, 50)]
+    lboard = []
+    for ii, row in enumerate(floor):
+        for jj, ctile in enumerate(row):
+            tile = _tiles[ctile](Position(ii, jj))
+            lboard.append(tile)
+    board = Board(lboard)
+    return board
 
 
 def read_board(fname):
@@ -254,6 +276,8 @@ class Tile(object):
     is_breakable = False
     is_swimmable = False
     is_clear_view = False
+    is_openable = False
+    is_stairs = False
 
     def __init__(self, pos):
         self.pos = pos
@@ -262,12 +286,12 @@ class Tile(object):
         return self.face
 
 
-class BlankSpaceTile(Tile):
+class DirtWallTile(Tile):
     name = ' '
     face = name
 
 
-class DirtTile(Tile):
+class DirtFloorTile(Tile):
     name = '.'
     face = '{t.dim}{t.gray}{name}{t.normal}'.format(t=term, name=name)
     is_passable = True
@@ -279,23 +303,43 @@ class StoneWallTile(Tile):
     face = '{t.dim}{t.gray}{name}{t.normal}'.format(t=term, name=name)
 
 
-class WaterTile(Tile):
-    name = '~'
-    face = '{t.blue}{name}{t.normal}'.format(t=term, name=name)
-    is_swimmable = True
+class DoorTile(Tile):
+    name = '+'
+    face = '{t.dim}{t.gray}{name}{t.normal}'.format(t=term, name=name)
+    is_openable = True
+
+    def opened(self):
+        self.name = DirtFloorTile.name
+        self.face = DirtFloorTile.face
+        self.is_passable = True
+        self.is_clear_view = True
+        self.is_openable = False
+
+
+class UpStairsTile(Tile):
+    name = '<'
+    face = '{t.dim}{t.gray}{name}{t.normal}'.format(t=term, name=name)
     is_clear_view = True
+    is_passable = True
+    is_stairs = True
+    delta_z = +1
 
 
-class LavaTile(Tile):
-    name = '~'
-    face = '{t.red}{name}{t.normal}'.format(t=term, name=name)
+class DownStairsTile(Tile):
+    name = '>'
+    face = '{t.dim}{t.gray}{name}{t.normal}'.format(t=term, name=name)
     is_clear_view = True
+    is_passable = True
+    is_stairs = True
+    delta_z = -1
 
 
-_concrete_tiles = [DirtTile,
+_concrete_tiles = [DirtWallTile,
+                   DirtFloorTile,
                    StoneWallTile,
-                   WaterTile,
-                   BlankSpaceTile,
+                   DoorTile,
+                   UpStairsTile,
+                   DownStairsTile,
                   ]
 
 _tiles = {ti.name : ti for ti in _concrete_tiles}
@@ -332,7 +376,7 @@ Coins  : {pl.coins:7n}
 
     def draw_board(self, board):
         with term.location():
-            for tile in board.flatten():
+            for tile in board.tiles():
                 pos = self.map_pos + tile.pos
                 print term.move(pos.x, pos.y) + tile.face
 
@@ -383,13 +427,15 @@ class Game(object):
     def player_turn(self):
         if move_commands.has_key(self.kp):
             new_pos = self.pl.pos + move_commands[self.kp]
-            valid_move = self.board.is_valid_move(new_pos)
+            move_tile = self.board[new_pos]
             if new_pos in [mm.pos for mm in self.mobs]:
                 mob = [mm for mm in self.mobs if mm.pos == new_pos][0]
                 self.pl.attack(mob)
                 if mob.hp <= 0:
                     self.pl.move(new_pos)
-            elif valid_move:
+            elif move_tile.is_openable:
+                self.board[new_pos].opened()
+            elif move_tile.is_passable:
                 self.pl.move(new_pos)
 
     def mob_turn(self):
@@ -404,7 +450,7 @@ class Game(object):
             if new_pos == self.pl.pos:
                 mob.attack(pl)
             # TODO mobs cant occupy same space
-            elif self.board.is_valid_move(new_pos):
+            elif self.board[new_pos].is_passable:
                 mob.move(new_pos)
         if self.pl.hp <= 0:
             raise GameOver()
@@ -412,12 +458,14 @@ class Game(object):
 
 if __name__ == '__main__':
     screen = Screen()
-    board = read_board('test_map.txt')
-    pl = Player(Position(2, 5))
-    mobs = [Bat(Position(1, 3)),
-            Zombie(Position(3, 7)),
-            GreenSlime(Position(1, 7)),
-            BlueSlime(Position(4, 16))]
+    board = get_floor()
+    pl = Player(board.upstairs.pos.copy())
+    mobs = []
+    #pl = Player(Position(2, 5))
+    #mobs = [Bat(Position(1, 3)),
+    #        Zombie(Position(3, 7)),
+    #        GreenSlime(Position(1, 7)),
+    #        BlueSlime(Position(4, 16))]
     game = Game(board, pl, mobs, screen)
     while True:
         try:
