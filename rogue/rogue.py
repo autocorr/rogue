@@ -8,19 +8,18 @@ A simple console rogue-like game.
 
 """
 # TODO
-# doors
-# generate maps
-# vision
+# treasure chests
+# multiple floors
+# drop money
+# vision and visited tiles
+# drop loot, items
 # unit pathing
 # lighting
-# loot and items
 # synchronous rhythmic input and indicator, generate a bass-line or drum
 #   beat using a given tempo
-# vertical levels, stairs
 # boss mobs
 # shopkeeper & store
-# read in MP3, FFT to get beats, then use
-#   that as beat for the input
+# read in MP3, FFT to get beats, then use that as beat for the input
 
 import random
 import subprocess
@@ -137,6 +136,7 @@ class Bat(Monster):
     hp = 1
     score = 1
     base_hit = 1
+    level = 1
 
     def __init__(self, pos):
         super(Bat, self).__init__(pos)
@@ -157,6 +157,7 @@ class Zombie(Monster):
     hp = 1
     score = 1
     base_hit = 1
+    level = 1
 
     def __init__(self, pos):
         super(Zombie, self).__init__(pos)
@@ -173,12 +174,13 @@ class Zombie(Monster):
             return self.pos + self.move_dir
 
 
-class GreenSlime(Monster):
-    name = 's'
+class Mushroom(Monster):
+    name = 'm'
     face = '{t.green}{name}{t.normal}'.format(t=term, name=name)
     hp = 1
     score = 1
     base_hit = 1
+    level = 1
 
     def get_move(self):
         return self.pos
@@ -190,12 +192,16 @@ class BlueSlime(Monster):
     hp = 2
     score = 1
     base_hit = 1
+    level = 1
 
     def __init__(self, pos):
         super(BlueSlime, self).__init__(pos)
-        self.moves = deque([Position( 1, 0),
+        jump_pos = (Position( 1, 0), Position(-1, 0)) \
+                   if random.choice([True, False]) else \
+                   (Position( 0, 1), Position( 0,-1))
+        self.moves = deque([jump_pos[0],
                             Position( 0, 0),
-                            Position(-1, 0),
+                            jump_pos[1],
                             Position( 0, 0)])
 
     def get_move(self):
@@ -244,26 +250,36 @@ class Board(object):
         return deepcopy(self)
 
 
-def get_floor():
-    floor = subprocess.Popen(['./map_generator'],
-                             stdout=subprocess.PIPE).communicate()[0]
-    floor = floor.replace('X', ' ')
-    floor = [floor[ii:ii+50] for ii in range(0, 15 * 50, 50)]
-    lboard = []
-    for ii, row in enumerate(floor):
-        for jj, ctile in enumerate(row):
-            tile = _tiles[ctile](Position(ii, jj))
-            lboard.append(tile)
-    board = Board(lboard)
-    return board
+class Floor(object):
+    mob_fac = 0.05
 
+    def __init__(self, zlevel=1):
+        self.zlevel = 1
+        self.board = self.get_board()
+        self.mobs = self.get_mobs()
 
-def read_board(fname):
-    with open(fname, 'r') as ff:
-        lboard = [[_tiles[cc](Position(ii, jj))
-                   for jj, cc in enumerate(row.rstrip('\n'))]
-                  for ii, row in enumerate(ff.readlines())]
-    return Board(lboard)
+    def get_board(self):
+        # FIXME sometimes floor doesnt generate both doors
+        floor = ''
+        while ('>' not in floor) & ('<' not in floor):
+            floor = subprocess.Popen(['./map_generator'],
+                                     stdout=subprocess.PIPE).communicate()[0]
+        floor = floor.replace('X', ' ')
+        floor = [floor[ii:ii+50] for ii in range(0, 15 * 50, 50)]
+        lboard = []
+        for ii, row in enumerate(floor):
+            for jj, ctile in enumerate(row):
+                tile = _tiles[ctile](Position(ii, jj))
+                lboard.append(tile)
+        board = Board(lboard)
+        return board
+
+    def get_mobs(self):
+        pass_pos = [tt.pos for tt in self.board._b if tt.is_passable]
+        nmobs = int((1 + 0.2 * self.zlevel) * self.mob_fac * len(pass_pos))
+        monster_cls = Monster.__subclasses__()
+        return [random.choice(monster_cls)(pos)
+                for pos in np.random.choice(pass_pos, size=nmobs)]
 
 
 ################################################################################
@@ -458,14 +474,9 @@ class Game(object):
 
 if __name__ == '__main__':
     screen = Screen()
-    board = get_floor()
+    floor = Floor(zlevel=1)
+    board, mobs = floor.board, floor.mobs
     pl = Player(board.upstairs.pos.copy())
-    mobs = []
-    #pl = Player(Position(2, 5))
-    #mobs = [Bat(Position(1, 3)),
-    #        Zombie(Position(3, 7)),
-    #        GreenSlime(Position(1, 7)),
-    #        BlueSlime(Position(4, 16))]
     game = Game(board, pl, mobs, screen)
     while True:
         try:
